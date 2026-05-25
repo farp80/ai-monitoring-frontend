@@ -1,73 +1,119 @@
-# React + TypeScript + Vite
+# AI Monitoring Frontend
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+React + Vite app with OAuth sign-in (Gmail/Google, Microsoft, Yahoo) and payloads prepared for a FastAPI backend.
 
-Currently, two official plugins are available:
+## Quick start
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
-
-## React Compiler
-
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
-
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```bash
+cp .env.example .env
+npm install
+npm run dev
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+Open [http://localhost:5173](http://localhost:5173). With `VITE_AUTH_MOCK=true`, click any provider to simulate login locally.
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+## User data for FastAPI
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+### Request — `POST /api/v1/auth/oauth`
+
+Sent after the provider redirects to `/auth/callback`:
+
+```json
+{
+  "provider": "google",
+  "authorization_code": "<code from provider>",
+  "redirect_uri": "http://localhost:5173/auth/callback",
+  "code_verifier": "<PKCE verifier, 43+ chars>",
+  "state": "<csrf state>"
+}
 ```
+
+TypeScript: `OAuthLoginRequest` in `src/types/auth.ts`. Pydantic reference: `docs/fastapi-auth-models.py`.
+
+### Response — session + user
+
+```json
+{
+  "access_token": "jwt-or-opaque",
+  "token_type": "bearer",
+  "expires_in": 3600,
+  "refresh_token": null,
+  "user": {
+    "id": "usr_abc",
+    "email": "user@example.com",
+    "email_verified": true,
+    "display_name": "Jane Doe",
+    "given_name": "Jane",
+    "family_name": "Doe",
+    "avatar_url": "https://...",
+    "provider": "google",
+    "provider_subject": "108234...",
+    "roles": ["user"],
+    "created_at": "2026-05-25T12:00:00Z",
+    "last_login_at": "2026-05-25T12:00:00Z"
+  }
+}
+```
+
+Backend must exchange `authorization_code` with the provider and validate tokens; the frontend only forwards the code and PKCE values.
+
+### Client-side user (`AuthUser`)
+
+CamelCase mirror used in React after login: `id`, `email`, `emailVerified`, `displayName`, `provider`, `providerSubject`, `roles`, etc. See `mapBackendUser()` in `src/services/authService.ts`.
+
+## Environment
+
+| Variable | Purpose |
+|----------|---------|
+| `VITE_API_BASE_URL` | FastAPI origin; empty = Vite proxy `/api` → `localhost:8000` |
+| `VITE_AUTH_MOCK` | `true` for local mock OAuth (no client IDs) |
+| `VITE_GOOGLE_CLIENT_ID` | Google Cloud OAuth client |
+| `VITE_MICROSOFT_CLIENT_ID` | Azure app registration client ID |
+| `VITE_YAHOO_CLIENT_ID` | Yahoo Developer app client ID |
+
+Register redirect URI: `http://localhost:5173/auth/callback` (and production URL when deployed).
+
+## Project structure
+
+```
+src/
+  types/auth.ts          # API types
+  config/auth.ts         # Providers + env
+  lib/pkce.ts            # PKCE helpers
+  lib/storage.ts         # Session storage
+  services/              # authService, apiClient
+  context/AuthContext.tsx
+  components/auth/       # LoginPage, ProviderButton, Dashboard
+  pages/AuthCallback.tsx
+.cursor/rules/           # Cursor IDE rules
+docs/fastapi-auth-models.py
+AGENTS.md
+```
+
+## FastAPI endpoint (expected)
+
+```python
+@router.post("/api/v1/auth/oauth", response_model=AuthSession)
+async def oauth_login(body: OAuthLoginRequest):
+    # 1. Exchange code + code_verifier with provider token endpoint
+    # 2. Validate id_token / fetch userinfo
+    # 3. Upsert user, issue your JWT
+    ...
+```
+
+## Cursor
+
+- Rules: `.cursor/rules/auth-oauth.mdc`
+- Agent context: `AGENTS.md`
+
+## Scripts
+
+| Command | Description |
+|---------|-------------|
+| `npm run dev` | Dev server with API proxy |
+| `npm run build` | Production build |
+| `npm run lint` | ESLint |
+
+## Production
+
+Set `VITE_AUTH_MOCK=false`, provide real client IDs, use HTTPS redirect URIs, and point `VITE_API_BASE_URL` at your API.

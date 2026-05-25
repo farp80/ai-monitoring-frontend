@@ -1,0 +1,12 @@
+---
+description: OAuth login and FastAPI auth integration for this frontend
+globs: src/**/*.{ts,tsx}
+alwaysApply: false
+---
+
+# Auth conventions
+
+- User/API types live in `src/types/auth.ts`; use snake_case on wire (FastAPI).
+- OAuth uses PKCE; pending state in `sessionStorage` via `src/lib/storage.ts`.
+- POST login body to `/api/v1/auth/oauth`; do not store provider secrets in the client.
+- Set `VITE_AUTH_MOCK=true` for local UI tests without real OAuth apps.
